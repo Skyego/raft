@@ -1,5 +1,58 @@
 Simon (@superfell) and I (@ongardie) talked through reworking this library's cluster membership changes last Friday. We don't see a way to split this into independent patches, so we're taking the next best approach: submitting the plan here for review, then working on an enormous PR. Your feedback would be appreciated. (@superfell is out this week, however, so don't expect him to respond quickly.)
 
+主要更改
+1.角色的新增和转换逻辑
+2.配置文件的处理
+
+主要目标：
+1. 使事情符合博士论文中的描述；
+2. catch up new servers 的优先级高于授予其投票权，同时允许永久无投票权节点存在；
+(感觉就像是很多里面存在的那种最终一致性备份节点)
+3. 去掉peers.json文件，避免log和snapshot之间的一致性问题。
+
+## 数据为中心的视图
+我们建议将*配置*重新定义为一组服务器，其中每台服务器都包括一个地址（就像今天一样）和一种模式，即：
+1. *Voter*：投票会被统计，同时其index用于推进leader的commit index
+2. *Nonvoter*：无投票权节点，接收日志条目但不考虑用于选举或承诺目的的服务器，即永久无投票权节点
+3. *Staging*：即一开始是Nonvoter（无投票权节点），收到足够多的日志条目来足够赶上领导者的日志，领导者将调用成员资格变更，将 Staging 服务器更改为投票者。
+   注意是 领导者主动执行的变更，谁负责检测合适符合要求了？ leader 吧
+
+所有对于配置的变更都会通过向日志写入一个新的配置的方式实现。
+新配置将会在append到日志里之后，立即生效（而不是像普通状态机命令一样提交时）[注：这里需要注意以及应该是不再通过放到状态机里进行执行了]。
+根据论文一次最多可以有一个未提交的配置，在提交前一个配置之前，可能不会创建下一个配置。？？？ 是直接代码里不允许呢，还是可能不会可能会。
+对于非服务器/登台服务器，严格来说没有必要遵循这些规则，但我们认为最好是统一对待所有更改。
+
+每台服务器将跟踪两种配置：
+1. *committed configuration*：日志/快照中已提交的最新配置及其索引（log index）。
+2. *latest configuration*：日志/快照中的最新配置（可能已提交或未提交）及其索引。
+
+如果没有成员变更，那么这两个配置相同。除以下情况外，大部分情况下，当前使用的配置信息是*latest configuration*：
+1. 当follower 截断他们日志的后缀时，他们可能需要退回到提交的配置。[注：即这个配置已经无效了。]
+2. 快照时，会写入提交的配置，以与正在快照的提交日志前缀相对应。
+(the committed configuration is written, to correspond with the committed log prefix that is being snapshotted.)
+
+## 应用程序接口
+我们建议客户端执行以下操作来操纵集群配置：
+- AddVoter:服务器变为暂存，除非投票者，
+- AddNonvoter:添加nonvoter，服务器将成为nonvoter，除非暂存或投票者，
+- DemoteVoter:降级Voter，除非缺席，否则服务器将成为nonvoter，
+- RemovePeer:将服务器从配置中删除
+- GetConfiguration：等待提交最新配置，返回提交的配置。
+  虽然这些操作不是很对称，但我们认为它们是捕捉用户可能意图的良好设置。
+  例如，如果我想确保某个服务器没有投票权，但该服务器根本不是配置的一部分，则可能不应将其添加为非投票服务器。
+
+这些应用程序级OP中的每一项都将由leader进行解释，如果有影响（配置变化），将导致leader在其日志中写入新的配置条目。
+导致 log entry写入的操作，不需要是日志项的一部分[注：命令日志写入的操作，不需要作为日志记录]。
+
+# 代码实现
+这是一个不完整的列表：
+1. 移除PeerStore: 去掉了存储的peers.json文件的PeerStore(这个可能会导致和log/snapshot不同步，日志更改也很难原子性保存和维护，也不清楚它是要跟踪提交的配置还是最新的配置)。
+2. 服务器必须搜索其快照和日志，才能在启动时找到提交的配置和最新的配置。
+3. Bootstrap(引导程序)将不再使用peers.json，而是使用应用程序提供的configuration entry，来初始化日志或快照
+4. 快照应存储cfg配置及其该配置对应的log index。根据我使用 LogCabin 的经验，配置的原始日志索引对于包含在调试日志消息中非常有用。
+5. 配置变更请求应该通过一个单独的通道处理，并且只有等上一个committed之后，才能处理/创建新的，hashicorp/raft#84。
+6. 对于日志caught up的判断，可以在单独的PR中实现。一个简单的方法是当Staging达到leader commit index 的95% 就提升为 Voter
+
 These are the main goals:
  - Bringing things in line with the description in my PhD dissertation;
  - Catching up new servers prior to granting them a vote, as well as allowing permanent non-voting members; and

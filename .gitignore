@@ -21,3 +21,7 @@ _testmain.go
 
 *.exe
 *.test
+/.idea/modules.xml
+/.idea/raft.iml
+/.idea/vcs.xml
+/.idea/workspace.xml

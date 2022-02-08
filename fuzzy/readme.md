@@ -61,3 +61,5 @@ Starts a 5 node cluster, and then removes the node that is the leader.
 ### TestRaft_RemovePartitionedNode
 
 Starts a 5 node cluster, partitions one of the follower nodes off the network, and then tells the leader to remove that node, then heals the partition.
+
+注：这一条很有参考意义
