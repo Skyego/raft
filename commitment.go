@@ -8,6 +8,8 @@ import (
 // Commitment is used to advance the leader's commit index. The leader and
 // replication goroutines report in newly written entries with Match(), and
 // this notifies on commitCh when the commit index has advanced.
+// 推进leader的commit index。
+//领导者和复制 goroutine 使用 Match() 报告新写入的条目，并在提交索引前进时通知 commitCh。
 type commitment struct {
 	// protects matchIndexes and commitIndex
 	sync.Mutex

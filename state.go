@@ -70,6 +70,7 @@ type raftState struct {
 	routinesGroup sync.WaitGroup
 
 	// The current state
+	// 节点状态使用atomic处理(基于CPU硬件支持的原子操作)
 	state RaftState
 }
 
@@ -160,7 +161,7 @@ func (r *raftState) getLastIndex() uint64 {
 }
 
 // getLastEntry returns the last index and term in stable storage.
-// Either from the last log or from the last snapshot.
+// 比较返回日志和snapshot中较大的index termID
 func (r *raftState) getLastEntry() (uint64, uint64) {
 	r.lastLock.Lock()
 	defer r.lastLock.Unlock()

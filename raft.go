@@ -20,7 +20,8 @@ const (
 )
 
 var (
-	keyCurrentTerm  = []byte("CurrentTerm")
+	keyCurrentTerm = []byte("CurrentTerm")
+	// 通过记录投票的信息，用于判断是否已经投票
 	keyLastVoteTerm = []byte("LastVoteTerm")
 	keyLastVoteCand = []byte("LastVoteCand")
 )
@@ -36,6 +37,7 @@ func (r *Raft) getRPCHeader() RPCHeader {
 
 // checkRPCHeader houses logic about whether this instance of Raft can process
 // the given RPC message.
+// 主要是ProtocolVersion校验 看是否能处理
 func (r *Raft) checkRPCHeader(rpc RPC) error {
 	// Get the header off the RPC message.
 	wh, ok := rpc.Command.(WithRPCHeader)
@@ -74,6 +76,7 @@ func getSnapshotVersion(protocolVersion ProtocolVersion) SnapshotVersion {
 
 // commitTuple is used to send an index that was committed,
 // with an optional associated future that should be invoked.
+// Tuple 元组
 type commitTuple struct {
 	log    *Log
 	future *logFuture
@@ -97,6 +100,7 @@ func (r *Raft) setLeader(leader ServerAddress) {
 	r.leader = leader
 	r.leaderLock.Unlock()
 	if oldLeader != leader {
+		// leader节点发生变化
 		r.observe(LeaderObservation{Leader: leader})
 	}
 }
@@ -136,6 +140,8 @@ func (r *Raft) run() {
 		}
 
 		// Enter into a sub-FSM
+		// 这里虽然是死循环 但是进入某个case之后，如果这个case不退出 就会一直在执行这个case
+		// 即如果当前是follower，只会进入runFollower，直到这个函数return，之后进行下一次for循环
 		switch r.getState() {
 		case Follower:
 			r.runFollower()
@@ -148,6 +154,7 @@ func (r *Raft) run() {
 }
 
 // runFollower runs the FSM for a follower.
+// 1.对于leader才能处理的请求 采用直接返回Not Leader的方式
 func (r *Raft) runFollower() {
 	didWarn := false
 	r.logger.Info("entering follower state", "follower", r, "leader", r.Leader())
@@ -157,29 +164,11 @@ func (r *Raft) runFollower() {
 	for r.getState() == Follower {
 		select {
 		case rpc := <-r.rpcCh:
+			// 处理来自transport layer 的RPC请求：appendEntries、requestVote、installSnapshot、timeoutNow
 			r.processRPC(rpc)
 
-		case c := <-r.configurationChangeCh:
-			// Reject any operations since we are not the leader
-			c.respond(ErrNotLeader)
-
-		case a := <-r.applyCh:
-			// Reject any operations since we are not the leader
-			a.respond(ErrNotLeader)
-
-		case v := <-r.verifyCh:
-			// Reject any operations since we are not the leader
-			v.respond(ErrNotLeader)
-
-		case r := <-r.userRestoreCh:
-			// Reject any restores since we are not the leader
-			r.respond(ErrNotLeader)
-
-		case r := <-r.leadershipTransferCh:
-			// Reject any operations since we are not the leader
-			r.respond(ErrNotLeader)
-
 		case c := <-r.configurationsCh:
+			// 用来获取当前的配置信息 包含committed 和 latest 会将当前的配置返回
 			c.configurations = r.configurations.Clone()
 			c.respond(nil)
 
@@ -192,12 +181,14 @@ func (r *Raft) runFollower() {
 			heartbeatTimer = randomTimeout(hbTimeout)
 
 			// Check if we have had a successful contact
+			// 判断是否超时，未超时直接返回
 			lastContact := r.LastContact()
 			if time.Now().Sub(lastContact) < hbTimeout {
 				continue
 			}
 
 			// Heartbeat failed! Transition to the candidate state
+			// 心跳超时 置空leader
 			lastLeader := r.Leader()
 			r.setLeader("")
 
@@ -216,11 +207,22 @@ func (r *Raft) runFollower() {
 				r.logger.Warn("heartbeat timeout reached, starting election", "last-leader", lastLeader)
 				metrics.IncrCounter([]string{"raft", "transition", "heartbeat_timeout"}, 1)
 				r.setState(Candidate)
-				return
+				return // 退出当前死循环FSM 下次
 			}
 
 		case <-r.shutdownCh:
 			return
+		// 各种需要leader处理的请求直接返回自己不是leader
+		case c := <-r.configurationChangeCh:
+			c.respond(ErrNotLeader)
+		case a := <-r.applyCh:
+			a.respond(ErrNotLeader)
+		case v := <-r.verifyCh:
+			v.respond(ErrNotLeader)
+		case r := <-r.userRestoreCh:
+			r.respond(ErrNotLeader)
+		case r := <-r.leadershipTransferCh:
+			r.respond(ErrNotLeader)
 		}
 	}
 }
@@ -260,6 +262,9 @@ func (r *Raft) runCandidate() {
 	// which will make other servers vote even though they have a leader already.
 	// It is important to reset that flag, because this priviledge could be abused
 	// otherwise.
+	//确保每次运行后重置领导权转移标志。
+	//拥有此标志会将 RequestVoteRequst 中的 LeadershipTransfer 字段设置为 true，这将使其他服务器投票，即使它们已经有领导者。
+	//重置该标志很重要，因为否则可能会滥用此特权。
 	defer func() { r.candidateFromLeadershipTransfer = false }()
 
 	electionTimer := randomTimeout(r.config().ElectionTimeout)
@@ -276,6 +281,7 @@ func (r *Raft) runCandidate() {
 
 		case vote := <-voteCh:
 			// Check if the term is greater than ours, bail
+			//如果其它节点term大于本节点 会直接设置为follower
 			if vote.Term > r.getCurrentTerm() {
 				r.logger.Debug("newer term discovered, fallback to follower")
 				r.setState(Follower)
@@ -296,42 +302,31 @@ func (r *Raft) runCandidate() {
 				r.setLeader(r.localAddr)
 				return
 			}
-
-		case c := <-r.configurationChangeCh:
-			// Reject any operations since we are not the leader
-			c.respond(ErrNotLeader)
-
-		case a := <-r.applyCh:
-			// Reject any operations since we are not the leader
-			a.respond(ErrNotLeader)
-
-		case v := <-r.verifyCh:
-			// Reject any operations since we are not the leader
-			v.respond(ErrNotLeader)
-
-		case r := <-r.userRestoreCh:
-			// Reject any restores since we are not the leader
-			r.respond(ErrNotLeader)
-
-		case r := <-r.leadershipTransferCh:
-			// Reject any operations since we are not the leader
-			r.respond(ErrNotLeader)
-
-		case c := <-r.configurationsCh:
-			c.configurations = r.configurations.Clone()
-			c.respond(nil)
-
-		case b := <-r.bootstrapCh:
-			b.respond(ErrCantBootstrap)
-
 		case <-electionTimer:
-			// Election failed! Restart the election. We simply return,
-			// which will kick us back into runCandidate
+			// 选举超时直接返回，之后会再次进入本函数，重新发起选举
 			r.logger.Warn("Election timeout reached, restarting election")
 			return
 
+		case c := <-r.configurationsCh:
+			// 用来获取当前的配置信息 包含committed 和 latest 会将当前的配置返回
+			c.configurations = r.configurations.Clone()
+			c.respond(nil)
+		case b := <-r.bootstrapCh:
+			b.respond(ErrCantBootstrap)
+
 		case <-r.shutdownCh:
 			return
+			// 各种需要leader处理的请求直接返回自己不是leader
+		case c := <-r.configurationChangeCh:
+			c.respond(ErrNotLeader)
+		case a := <-r.applyCh:
+			a.respond(ErrNotLeader)
+		case v := <-r.verifyCh:
+			v.respond(ErrNotLeader)
+		case r := <-r.userRestoreCh:
+			r.respond(ErrNotLeader)
+		case r := <-r.leadershipTransferCh:
+			r.respond(ErrNotLeader)
 		}
 	}
 }
@@ -344,6 +339,7 @@ func (r *Raft) setLeadershipTransferInProgress(v bool) {
 	}
 }
 
+// 是否正在执行切leader
 func (r *Raft) getLeadershipTransferInProgress() bool {
 	v := atomic.LoadInt32(&r.leaderState.leadershipTransferInProgress)
 	return v == 1
@@ -474,6 +470,7 @@ func (r *Raft) runLeader() {
 // new peers, and stop replication to removed peers. Before removing a peer,
 // it'll instruct the replication routines to try to replicate to the current
 // index. This must only be called from the main thread.
+//
 func (r *Raft) startStopReplication() {
 	inConfig := make(map[ServerID]bool, len(r.configurations.latest.Servers))
 	lastIdx := r.getLastIndex()
@@ -760,7 +757,7 @@ func (r *Raft) leaderLoop() {
 				newLog.respond(ErrLeadershipTransferInProgress)
 				continue
 			}
-			// Group commit, gather all the ready commits
+			// Group commit, gather all the ready commits. 组提交，收集所有准备好的提交
 			ready := []*logFuture{newLog}
 		GROUP_COMMIT_LOOP:
 			for i := 0; i < r.config().MaxAppendEntries; i++ {
@@ -1081,6 +1078,7 @@ func (r *Raft) appendConfigurationEntry(future *configurationChangeFuture) {
 
 // dispatchLog is called on the leader to push a log to disk, mark it
 // as inflight and begin replication of it.
+// 将其标记为飞行中并开始复制。
 func (r *Raft) dispatchLogs(applyLogs []*logFuture) {
 	now := time.Now()
 	defer metrics.MeasureSince([]string{"raft", "leader", "dispatchLog"}, now)
@@ -1227,6 +1225,7 @@ func (r *Raft) prepareLog(l *Log, future *logFuture) *commitTuple {
 
 // processRPC is called to handle an incoming RPC request. This must only be
 // called from the main thread.
+// 处理来自transport layer 的RPC请求：appendEntries、requestVote、installSnapshot、timeoutNow
 func (r *Raft) processRPC(rpc RPC) {
 	if err := r.checkRPCHeader(rpc); err != nil {
 		rpc.Respond(nil, err)
@@ -1290,6 +1289,7 @@ func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
 	}()
 
 	// Ignore an older term
+	// 拒绝比自己低的term
 	if a.Term < r.getCurrentTerm() {
 		return
 	}
@@ -1463,6 +1463,8 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	// check the LeadershipTransfer flag is set. Usually votes are rejected if
 	// there is a known leader. But if the leader initiated a leadership transfer,
 	// vote!
+	//这里和后面可以知道，如果同一个人给了两次同样的请求，上次投票了这次也会投票
+	//如果当前有leader且并非请求投票的节点，通常投票会被拒绝。但是，如果领导者发起了领导层转移，请投票！
 	candidate := r.trans.DecodePeer(req.Candidate)
 	if leader := r.Leader(); leader != "" && leader != candidate && !req.LeadershipTransfer {
 		r.logger.Warn("rejecting vote request since we have a leader",
@@ -1471,12 +1473,13 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 		return
 	}
 
-	// Ignore an older term
+	// 拒绝小于自己Term的投票请求
 	if req.Term < r.getCurrentTerm() {
 		return
 	}
 
 	// Increase the term if we see a newer one
+	// 如果有更新的TermID直接设置自己为follower 同时持久化更新此值
 	if req.Term > r.getCurrentTerm() {
 		// Ensure transition to follower
 		r.logger.Debug("lost leadership because received a requestVote with a newer term")
@@ -1486,6 +1489,8 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	}
 
 	// Check if we have voted yet
+	//获取上次投票的Term和candidate信息
+	//如果lastVoteTerm == req.Term 则比较lastVoteCandBytes, req.Candidate 相同则投票，否则拒绝投票
 	lastVoteTerm, err := r.stable.GetUint64(keyLastVoteTerm)
 	if err != nil && err.Error() != "not found" {
 		r.logger.Error("failed to get last vote term", "error", err)
@@ -1508,6 +1513,8 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	}
 
 	// Reject if their term is older
+	// lastTerm > req.LastLogTerm 直接拒绝
+	// lastTerm == req.LastLogTerm 则比较 lastIdx > req.LastLogIndex 直接拒绝
 	lastIdx, lastTerm := r.getLastEntry()
 	if lastTerm > req.LastLogTerm {
 		r.logger.Warn("rejecting vote request since our last term is greater",
@@ -1526,12 +1533,14 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	}
 
 	// Persist a vote for safety
+	//持久化投票信息
 	if err := r.persistVote(req.Term, req.Candidate); err != nil {
 		r.logger.Error("failed to persist vote", "error", err)
 		return
 	}
 
 	resp.Granted = true
+	//设置lastContact的值，用于判断上次心跳时间
 	r.setLastContact()
 	return
 }
@@ -1679,16 +1688,16 @@ type voteResult struct {
 	voterID ServerID
 }
 
-// electSelf is used to send a RequestVote RPC to all peers, and vote for
-// ourself. This has the side affecting of incrementing the current term. The
-// response channel returned is used to wait for all the responses (including a
-// vote for ourself). This must only be called from the main thread.
+// electSelf
+// 投票给自己，同时向其它server发送RequestVote 通过chan异步获取请求相应。
+// 副作用：增加当前term的值（会持久化存入）
+// reps chan返回所有的响应，包含自己投给自己
 func (r *Raft) electSelf() <-chan *voteResult {
 	// Create a response channel
 	respCh := make(chan *voteResult, len(r.configurations.latest.Servers))
 
 	// Increment the term
-	r.setCurrentTerm(r.getCurrentTerm() + 1)
+	r.setCurrentTerm(r.getCurrentTerm() + 1) // 把CurrentTerm同时持久化到了本地DB
 
 	// Construct the request
 	lastIdx, lastTerm := r.getLastEntry()
@@ -1702,6 +1711,7 @@ func (r *Raft) electSelf() <-chan *voteResult {
 	}
 
 	// Construct a function to ask for a vote
+	// 请求投票，通过 respCh 等待返回结果
 	askPeer := func(peer Server) {
 		r.goFunc(func() {
 			defer metrics.MeasureSince([]string{"raft", "candidate", "electSelf"}, time.Now())
@@ -1722,12 +1732,14 @@ func (r *Raft) electSelf() <-chan *voteResult {
 	for _, server := range r.configurations.latest.Servers {
 		if server.Suffrage == Voter {
 			if server.ID == r.localID {
+				// 将投票请求信息 term candidate 持久化到disk 通过记录投票的信息，用于判断是否已经投票
 				// Persist a vote for ourselves
 				if err := r.persistVote(req.Term, req.Candidate); err != nil {
 					r.logger.Error("failed to persist vote", "error", err)
 					return nil
 				}
 				// Include our own vote
+				// 直接投给自己，并返回本节点的投票响应
 				respCh <- &voteResult{
 					RequestVoteResponse: RequestVoteResponse{
 						RPCHeader: r.getRPCHeader(),
@@ -1746,6 +1758,7 @@ func (r *Raft) electSelf() <-chan *voteResult {
 }
 
 // persistVote is used to persist our vote for safety.
+// 将投票请求信息 term candidate 持久化到disk，仅持久化到StableStore
 func (r *Raft) persistVote(term uint64, candidate []byte) error {
 	if err := r.stable.SetUint64(keyLastVoteTerm, term); err != nil {
 		return err
@@ -1757,6 +1770,7 @@ func (r *Raft) persistVote(term uint64, candidate []byte) error {
 }
 
 // setCurrentTerm is used to set the current term in a durable manner.
+// 先持久化到disk 之后更新currentTerm
 func (r *Raft) setCurrentTerm(t uint64) {
 	// Persist to disk first
 	if err := r.stable.SetUint64(keyCurrentTerm, t); err != nil {

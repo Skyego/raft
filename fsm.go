@@ -8,8 +8,7 @@ import (
 	"github.com/armon/go-metrics"
 )
 
-// FSM provides an interface that can be implemented by
-// clients to make use of the replicated log.
+// FSM 提供接口，应用层可以实现该接口，以使用已经在raft副本间复制的日志。
 type FSM interface {
 	// Apply log is invoked once a log entry is committed.
 	// It returns a value which will be made available in the

@@ -79,6 +79,7 @@ type Raft struct {
 
 	// applyCh is used to async send logs to the main thread to
 	// be committed and applied to the FSM.
+	// 将日志异步发送到主线程以提交并应用于 FSM。
 	applyCh chan *logFuture
 
 	// conf stores the current configuration to use. This is the most recent one
@@ -108,6 +109,8 @@ type Raft struct {
 
 	// lastContact is the last time we had contact from the
 	// leader node. This can be used to gauge staleness.
+	// 这里通过记录上次通信时间以及通过锁控制并发，相对更为清晰
+	// 这个和ETCD的处理逻辑不同，ETCD的逻辑需要梳理, 直接是bool字段
 	lastContact     time.Time
 	lastContactLock sync.RWMutex
 
@@ -162,10 +165,12 @@ type Raft struct {
 	snapshots SnapshotStore
 
 	// userSnapshotCh is used for user-triggered snapshots
+	// 用户触发快照
 	userSnapshotCh chan *userSnapshotFuture
 
 	// userRestoreCh is used for user-triggered restores of external
 	// snapshots
+	// 用户触发的使用 外部快照进行恢复？？？
 	userRestoreCh chan *userRestoreFuture
 
 	// stable is a StableStore implementation for durable state
@@ -177,9 +182,10 @@ type Raft struct {
 
 	// verifyCh is used to async send verify futures to the main thread
 	// to verify we are still the leader
+	// 异步验证自己的leader状态
 	verifyCh chan *verifyFuture
 
-	// configurationsCh is used to get the configuration data safely from
+	// configurationsCh is used to get the configuration data(含committed 和 latest) safely from
 	// outside of the main thread.
 	configurationsCh chan *configurationsFuture
 

@@ -5,11 +5,9 @@ import (
 	"io"
 )
 
-// DiscardSnapshotStore is used to successfully snapshot while
-// always discarding the snapshot. This is useful for when the
-// log should be truncated but no snapshot should be retained.
-// This should never be used for production use, and is only
-// suitable for testing.
+// DiscardSnapshotStore 用于成功完成快照，同时始终丢弃快照。
+// 这对于应截断日志但不应保留快照的情况很有用。
+// 这不应该用于生产用途，只适用于测试。
 type DiscardSnapshotStore struct{}
 
 // DiscardSnapshotSink is used to fulfill the SnapshotSink interface

@@ -4,6 +4,7 @@ package raft
 // other information about the cluster. For older Raft implementations before
 // versioning was added this will default to a zero-valued structure when read
 // by newer Raft versions.
+// 一个常见的子结构，用于传递协议版本和有关集群的其他信息。对于添加版本控制之前的较旧 Raft 实现，当较新的 Raft 版本读取时，这将默认为零值结构。
 type RPCHeader struct {
 	// ProtocolVersion is the version of the protocol the sender is
 	// speaking.
@@ -56,6 +57,7 @@ type AppendEntriesResponse struct {
 
 	// There are scenarios where this request didn't succeed
 	// but there's no need to wait/back-off the next attempt.
+	// 在某些情况下，此请求未成功，但无需等待下一次尝试。
 	NoRetryBackoff bool
 }
 
@@ -111,6 +113,7 @@ func (r *RequestVoteResponse) GetRPCHeader() RPCHeader {
 
 // InstallSnapshotRequest is the command sent to a Raft peer to bootstrap its
 // log (and state machine) from a snapshot on another peer.
+// 发送给 RaftPeer，用于从另一个对等体的快照中引导其日志（和状态机）。
 type InstallSnapshotRequest struct {
 	RPCHeader
 	SnapshotVersion SnapshotVersion
@@ -157,6 +160,7 @@ func (r *InstallSnapshotResponse) GetRPCHeader() RPCHeader {
 
 // TimeoutNowRequest is the command used by a leader to signal another server to
 // start an election.
+// 领导者用来通知另一个服务器开始选举的命令。
 type TimeoutNowRequest struct {
 	RPCHeader
 }

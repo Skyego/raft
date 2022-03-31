@@ -92,9 +92,12 @@ const (
 	ProtocolVersionMin ProtocolVersion = 0
 	// ProtocolVersionMax is the maximum protocol version
 	ProtocolVersionMax = 3
+	// 这里的 max min有一定借鉴意义
 )
 
 // SnapshotVersion is the version of snapshots that this server can understand.
+// 0：添加版本控制之前的原始Raft库
+// 1：新格式增加了对完整配置结构及其相关日志索引的支持，支持服务器 ID 和非投票服务器模式。同时兼容旧的的peers结构。
 // Currently, it is always assumed that the server generates the latest version,
 // though this may be changed in the future to include a configurable version.
 //
@@ -162,6 +165,7 @@ type Config struct {
 	// local node, then we forget all peers and transition into the follower state.
 	// If ShutdownOnRemove is set, we additional shutdown Raft. Otherwise,
 	// we can become a leader of a cluster containing only this node.
+	//
 	ShutdownOnRemove bool
 
 	// TrailingLogs controls how many logs we leave after a snapshot. This is used
@@ -197,6 +201,7 @@ type Config struct {
 	// NotifyCh is used to provide a channel that will be notified of leadership
 	// changes. Raft will block writing to this channel, so it should either be
 	// buffered or aggressively consumed.
+	// NotifyCh用于提供一个渠道，在领导层变动时通知该渠道。Raft将阻止对该通道的写入，因此它应该被缓冲或积极使用。
 	NotifyCh chan<- bool
 
 	// LogOutput is used as a sink for logs, unless Logger is specified.

@@ -161,6 +161,8 @@ RPC:
 		// raft commits stop flowing naturally. The actual heartbeats
 		// can't do this to keep them unblocked by disk IO on the
 		// follower. See https://github.com/hashicorp/raft/issues/282.
+		//这不是我们的心跳机制，而是为了确保追随者在raft提交停止自然流动时快速了解领导者的提交索引。
+		//实际的心跳无法通过跟随器上的磁盘IO来保持它们的畅通。
 		case <-randomTimeout(r.config().CommitTimeout):
 			lastLogIdx, _ := r.getLastLog()
 			shouldStop = r.replicateTo(s, lastLogIdx)

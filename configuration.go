@@ -61,6 +61,7 @@ type ServerAddress string
 // Server tracks the information about a single server in a configuration.
 type Server struct {
 	// Suffrage determines whether the server gets a vote.
+	// 选举权 决定这个服务是否拥有选票，
 	Suffrage ServerSuffrage
 	// ID is a unique string identifying this server for all time.
 	ID ServerID
@@ -164,6 +165,7 @@ func (c *configurations) Clone() (copy configurations) {
 
 // hasVote returns true if the server identified by 'id' is a Voter in the
 // provided Configuration.
+// 检测节点是否有投票权
 func hasVote(configuration Configuration, id ServerID) bool {
 	for _, server := range configuration.Servers {
 		if server.ID == id {

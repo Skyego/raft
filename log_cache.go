@@ -10,6 +10,9 @@ import (
 // the recently written entries. For implementations that do not
 // cache themselves, this can provide a substantial boost by
 // avoiding disk I/O on recent entries.
+// 包装任何 LogStore实现以提供内存中的环形缓冲区。
+//这用于缓存对最近写入条目的访问。
+//对于不缓存自身的实现，这可以通过避免最近条目上的磁盘 IO 来显着提升。
 type LogCache struct {
 	store LogStore
 

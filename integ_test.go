@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 )
 
+// 内存版raft，可以用断点测试
 // CheckInteg will skip a test if integration testing is not enabled.
 func CheckInteg(t *testing.T) {
 	if !IsInteg() {
@@ -218,7 +219,7 @@ func logBytes(i, sz int) []byte {
 // Tests Raft by creating a cluster, growing it to 5 nodes while
 // causing various stressful conditions
 func TestRaft_Integ(t *testing.T) {
-	CheckInteg(t)
+	//CheckInteg(t)
 	conf := DefaultConfig()
 	conf.LocalID = ServerID("first")
 	conf.HeartbeatTimeout = 50 * time.Millisecond

@@ -2,6 +2,9 @@ package raft
 
 // StableStore is used to provide stable storage
 // of key configurations to ensure safety.
+// K-V持久化存储接口，可以根据需要具体实现
+// Uint64存储 keyCurrentTerm、keyLastVoteTerm
+// Set存储 keyLastVoteCand
 type StableStore interface {
 	Set(key []byte, val []byte) error
 

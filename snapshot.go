@@ -8,7 +8,9 @@ import (
 	"github.com/armon/go-metrics"
 )
 
-// SnapshotMeta is for metadata of a snapshot.
+// SnapshotMeta snapshot的元数据
+// 旧版本:ID,Index,Term,Size,Peers
+// 新版本使用新的配置文件逻辑:ID,Index,Term,Size+Configuration,ConfigurationIndex
 type SnapshotMeta struct {
 	// Version is the version number of the snapshot metadata. This does not cover
 	// the application's data in the snapshot, that should be versioned
@@ -35,10 +37,8 @@ type SnapshotMeta struct {
 	Size int64
 }
 
-// SnapshotStore interface is used to allow for flexible implementations
-// of snapshot storage and retrieval. For example, a client could implement
-// a shared state store such as S3, allowing new nodes to restore snapshots
-// without streaming from the leader.
+// SnapshotStore 接口用于灵活实现快照存储和检索。
+// 例如，客户端可以实现共享状态存储，例如 S3，允许新节点恢复快照，而无需来自领导者的流式传输。
 type SnapshotStore interface {
 	// Create is used to begin a snapshot at a given index and term, and with
 	// the given committed configuration. The version parameter controls
