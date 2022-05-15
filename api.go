@@ -195,6 +195,7 @@ type Raft struct {
 
 	// List of observers and the mutex that protects them. The observers list
 	// is indexed by an artificial ID which is used for deregistration.
+	// TODO 这个的作用？ 观察者模式
 	observersLock sync.RWMutex
 	observers     map[uint64]*Observer
 
@@ -1165,6 +1166,11 @@ func (r *Raft) AppliedIndex() uint64 {
 // transfer leadership is safe however in a cluster where not every node has
 // the latest version. If a follower cannot be promoted, it will fail
 // gracefully.
+//LeadershipTransfer 将领导权转移到集群中的服务器。这只能从领导者那里调用，否则会失败。
+//领导者将停止接受客户端请求，确保目标服务器是最新的，并使用 TimeoutNow 消息开始传输。
+//此消息与触发目标服务器上的选举超时具有相同的效果。
+//由于不太可能有其他服务器开始选举，因此目标服务器很可能赢得选举。
+//然而，在并非每个节点都有最新版本的集群中，使用传输领导是安全的。如果无法提升追随者，它将优雅地失败。
 func (r *Raft) LeadershipTransfer() Future {
 	if r.protocolVersion < 3 {
 		return errorFuture{ErrUnsupportedProtocol}
@@ -1180,6 +1186,9 @@ func (r *Raft) LeadershipTransfer() Future {
 // to be used that includes this feature. Using transfer leadership is safe
 // however in a cluster where not every node has the latest version. If a
 // follower cannot be promoted, it will fail gracefully.
+//LeadershipTransferToServer 与 LeadershipTransfer 的作用相同，但在参数中采用服务器，以保证领导应转换到集群中的特定服务器。
+//请注意，raft 协议版本 小于3 不足以使用 LeadershipTransfer。必须使用包含此功能的该库的最新版本。
+//然而，在并非每个节点都有最新版本的集群中，使用传输领导是安全的。如果无法提升追随者，它将优雅地失败。
 func (r *Raft) LeadershipTransferToServer(id ServerID, address ServerAddress) Future {
 	if r.protocolVersion < 3 {
 		return errorFuture{ErrUnsupportedProtocol}

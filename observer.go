@@ -112,6 +112,7 @@ func (r *Raft) DeregisterObserver(or *Observer) {
 }
 
 // observe sends an observation to every observer.
+// 发送给所有的观察者 TODO 目的？
 func (r *Raft) observe(o interface{}) {
 	// In general observers should not block. But in any case this isn't
 	// disastrous as we only hold a read lock, which merely prevents

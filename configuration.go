@@ -17,6 +17,7 @@ const (
 	// staging server receives enough log entries to be sufficiently caught up to
 	// the leader's log, the leader will invoke a  membership change to change
 	// the Staging server to a Voter.
+	// 类似 learner TODO　具体使用逻辑和方式
 	Staging
 )
 
